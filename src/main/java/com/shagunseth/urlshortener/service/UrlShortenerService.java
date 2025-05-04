@@ -2,72 +2,60 @@ package com.shagunseth.urlshortener.service;
 
 import com.shagunseth.urlshortener.model.UrlMapping;
 import com.shagunseth.urlshortener.repository.UrlMappingRepository;
-import com.shagunseth.urlshortener.util.Base62Encoder;
-import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
+import java.util.Random;
 
 @Service
-@RequiredArgsConstructor
 public class UrlShortenerService {
 
-    private final UrlMappingRepository urlRepo;
-    private final StringRedisTemplate redisTemplate;
+    @Autowired
+    private UrlMappingRepository repository;
 
-    @Value("${app.base-url:http://localhost:8080/}")
-    private String baseUrl;
+    private static final String BASE_URL = "http://localhost:8080/r/";
+    private static final int SHORT_CODE_LENGTH = 4;
+    private static final String CHARACTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
     public String shortenUrl(String longUrl, LocalDateTime expiresAt) {
-        // Check if long URL already exists
-        Optional<UrlMapping> existing = urlRepo.findAll()
-                .stream()
-                .filter(e -> e.getLongUrl().equals(longUrl))
-                .findFirst();
+        String shortCode = generateShortCode();
 
-        if (existing.isPresent()) {
-            return baseUrl + existing.get().getShortCode();
+        // Ensure the shortCode is unique
+        while (repository.findByShortCode(shortCode).isPresent()) {
+            shortCode = generateShortCode();
         }
 
-        // Save new mapping
-        UrlMapping mapping = UrlMapping.builder()
-                .longUrl(longUrl)
-                .createdAt(LocalDateTime.now())
-                .expiresAt(expiresAt)
-                .build();
+        UrlMapping urlMapping = new UrlMapping();
+        urlMapping.setLongUrl(longUrl);
+        urlMapping.setShortCode(shortCode);
+        urlMapping.setCreatedAt(LocalDateTime.now());
+        urlMapping.setExpiresAt(expiresAt);
 
-        mapping = urlRepo.save(mapping);
-
-        String shortCode = Base62Encoder.encode(mapping.getId());
-        mapping.setShortCode(shortCode);
-        urlRepo.save(mapping);
-
-        // Cache it
-        redisTemplate.opsForValue().set(shortCode, longUrl);
-
-        return baseUrl + shortCode;
+        repository.save(urlMapping);
+        return BASE_URL + shortCode;
     }
 
     public String getOriginalUrl(String shortCode) {
-        // Check Redis cache
-        String cachedUrl = redisTemplate.opsForValue().get(shortCode);
-        if (cachedUrl != null) return cachedUrl;
+        UrlMapping mapping = repository.findByShortCode(shortCode)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Short URL not found or expired"));
 
-        // Fallback to DB
-        UrlMapping mapping = urlRepo.findByShortCode(shortCode)
-                .orElseThrow(() -> new RuntimeException("Short code not found"));
-
-        // Optional: check expiry
+    
         if (mapping.getExpiresAt() != null && mapping.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("Link has expired");
+            throw new RuntimeException("Short URL expired");
         }
-
-        // Cache it
-        redisTemplate.opsForValue().set(shortCode, mapping.getLongUrl());
-
+    
         return mapping.getLongUrl();
+    }
+
+    private String generateShortCode() {
+        StringBuilder sb = new StringBuilder(SHORT_CODE_LENGTH);
+        Random random = new Random();
+        for (int i = 0; i < SHORT_CODE_LENGTH; i++) {
+            sb.append(CHARACTERS.charAt(random.nextInt(CHARACTERS.length())));
+        }
+        return sb.toString();
     }
 }
