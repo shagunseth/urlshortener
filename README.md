@@ -36,7 +36,6 @@ A high-performance, distributed URL shortener system built with **Java Spring Bo
 - Redis
 - Docker & Docker Compose
 - Maven
-- Lombok
 
 ---
 
@@ -48,8 +47,8 @@ A high-performance, distributed URL shortener system built with **Java Spring Bo
 git clone https://github.com/your-username/url-shortener.git
 cd url-shortener
 mvn clean package -DskipTests
-docker-compose up --build
+mvn spring-boot:run
 
 
 App will be available at:
-🔗 http://localhost:8080
+🔗 http://localhost:8080/index.html
